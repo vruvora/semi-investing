@@ -1,4 +1,4 @@
-semi-investing
+Semiconductor Investing 
 ==============================
 
 Investing Framework for Making Computing Deflationary Again
