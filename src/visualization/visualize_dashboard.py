@@ -3,6 +3,7 @@ from dash.dependencies import Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
+import dash
 import dash_table
 import random
 import networkx as nx
@@ -29,7 +30,10 @@ app.layout = html.Div([
 @app.callback(Output('tabs-content-example-graph', 'children'),
               Input('tabs-example-graph', 'value'))
 def render_content(tab):
+
     if tab == 'asym-science':
+        centrality_df = pd.read_csv("data/processed/author_centrality.csv")
+        hetrogenous_df = centrality_df[centrality_df['Topic-Words'] == 'systems scheduling heterogeneous tasks distributed multiprocessor reducing decomposition cloud online']
         return html.Div([
             html.H3('What are scientiests working on?'),
             html.Div([
@@ -37,7 +41,16 @@ def render_content(tab):
             ]),
             html.Div([
                 dcc.Graph(id='topic_ts', figure=build_coauthorship_network())
-            ])
+            ]),
+            dcc.Dropdown(
+                id='topics-dropdown',
+                options=[{'label': i, 'value': i} for i in centrality_df['Topic-Words'].unique()],
+                value='systems scheduling heterogeneous tasks distributed multiprocessor reducing decomposition cloud online'
+            ),
+            dash_table.DataTable(
+                id='centrality_authors',
+                columns=[{"name": i, "id": i} for i in hetrogenous_df.columns],
+                data=hetrogenous_df.to_dict('records')),
         ])
     elif tab == 'tab-2-example-graph':
         return html.Div([
@@ -155,6 +168,16 @@ def build_coauthorship_network():
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                     )
     return fig
+
+
+@app.callback(
+    dash.dependencies.Output('centrality_authors', 'data'),
+    [dash.dependencies.Input('topics-dropdown', 'value')],
+)
+def update_sku_ts(topics_dropdown):
+     centrality_df = pd.read_csv("data/processed/author_centrality.csv")
+     topic_df = centrality_df[centrality_df['Topic-Words'] == topics_dropdown]
+     return topic_df.to_dict('records')
 
 def build_topic_evolution():
     topic_evol_df = pd.read_csv('data/processed/topic_labels.csv')
