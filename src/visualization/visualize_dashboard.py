@@ -1,3 +1,4 @@
+from re import S
 from dash import Dash, dcc, html
 from dash.dependencies import Input, Output
 import plotly.express as px
@@ -20,7 +21,7 @@ app.layout = html.Div([
     html.H3('Keep Semi-Conductors Deflationary'),
     dcc.Tabs(id="tabs-example-graph", value='asym-science', children=[
         dcc.Tab(label='Finding Asymetric Deep Tech Bets', value='asym-science'),
-        dcc.Tab(label='Tab Two', value='tab-2-example-graph'),
+        dcc.Tab(label='Supply Chain Analytics', value='supply-chain'),
         dcc.Tab(label='Talent & Energy Hubs', value='talent-map'),
 
     ]),
@@ -52,19 +53,16 @@ def render_content(tab):
                 columns=[{"name": i, "id": i} for i in hetrogenous_df.columns],
                 data=hetrogenous_df.to_dict('records')),
         ])
-    elif tab == 'tab-2-example-graph':
+    elif tab == 'supply-chain':
+        supplier_choke = pd.read_csv('data/processed/Supplier_Indegree_Score.csv')
+        supplier_choke = supplier_choke[supplier_choke['Chokepoint Score'] > 0]
+        supplier_choke['Chokepoint Score'] =  supplier_choke['Chokepoint Score'] / supplier_choke['Chokepoint Score'].sum()
         return html.Div([
-            html.H3('Tab content 2'),
-            dcc.Graph(
-                id='graph-2-tabs-dcc',
-                figure={
-                    'data': [{
-                        'x': [1, 2, 3],
-                        'y': [5, 10, 6],
-                        'type': 'bar'
-                    }]
-                }
-            )
+            html.H3('Semi-Conductor Supply Chain Networks'),
+            dcc.RadioItems(['Supplier', 'Customer'], 'Supplier', inline=True, id='partner_type'),
+            html.Div([dcc.Graph(id='supply_graph')]),
+            dcc.RadioItems(['Degree Centrality', 'Betweeness'], 'Degree Centrality', inline=True, id='choke_type'),
+            dash_table.DataTable(id='choke_df', columns=[{"name": i, "id": i} for i in supplier_choke.columns], data=supplier_choke.to_dict('records')),
         ])
     elif tab == 'talent-map':
         df = pd.read_csv('data/processed/electricity_prices.csv').sort_values(by="Number of Indeed Jobs", ascending=False)
@@ -171,6 +169,27 @@ def build_coauthorship_network():
 
 
 @app.callback(
+    dash.dependencies.Output('supply_graph', 'figure'),
+    [dash.dependencies.Input('partner_type', 'value')]
+)
+def update_supplier_graph(partner_type):
+    partners_df = pd.read_csv('data/processed/supply_chain_data.csv')
+    partners_df.loc[partners_df['Country'].isin(['UNITED STATES', ' UNITED STATES ']), 'Country'] = 'US'
+    partners_df.loc[partners_df['Country'].isin(['TAIWAN', ' TAIWAN ']), 'Country'] = 'Taiwan'
+    if partner_type == 'Customer':
+        customers_df = partners_df[partners_df['Relationship Type'] == 'Customer']
+        G_customer = nx.from_pandas_edgelist(customers_df, source='Company', target='Partner', create_using=nx.DiGraph())
+        return build_supply_chain(G_customer, customers_df, 'Customer')
+
+    else:
+        suppliers_df = partners_df[partners_df['Relationship Type'] == 'Supplier']
+        G_supplier = nx.from_pandas_edgelist(suppliers_df, source='Company', target='Partner', create_using=nx.DiGraph())
+        return build_supply_chain(G_supplier, suppliers_df, 'Supplier')
+
+
+
+
+@app.callback(
     dash.dependencies.Output('centrality_authors', 'data'),
     [dash.dependencies.Input('topics-dropdown', 'value')],
 )
@@ -178,6 +197,23 @@ def update_sku_ts(topics_dropdown):
      centrality_df = pd.read_csv("data/processed/author_centrality.csv")
      topic_df = centrality_df[centrality_df['Topic-Words'] == topics_dropdown]
      return topic_df.to_dict('records')
+
+@app.callback(
+     dash.dependencies.Output('choke_df', 'data'),
+     [dash.dependencies.Input('partner_type', 'value'), dash.dependencies.Input('choke_type', 'value')],
+ )
+def update_centrality_table(partner, choke_type):
+    if partner == 'Customer' and choke_type == 'Degree Centrality':
+        df = pd.read_csv('data/processed/Customer_Outdegree_Score.csv')
+    elif partner == 'Customer' and choke_type == 'Betweeness':
+        df = pd.read_csv('data/processed/Customer_Betweeness_Score.csv')
+    elif partner == 'Supplier' and choke_type == 'Degree Centrality':
+        df = pd.read_csv('data/processed/Supplier_Indegree_Score.csv')
+    else:
+        df = pd.read_csv('data/processed/Supplier_Betweeness_Score.csv')
+    df = df[df['Chokepoint Score'] > 0]
+    df['Chokepoint Score'] =  df['Chokepoint Score'] / df['Chokepoint Score'].sum()
+    return df.to_dict('records')
 
 def build_topic_evolution():
     topic_evol_df = pd.read_csv('data/processed/topic_labels.csv')
@@ -240,6 +276,78 @@ def build_energy_graph():
         )
     return fig
 
+def build_supply_chain(G, partner_df, partner):
+    country_colors = {'Taiwan': "Red", "US": 'Blue', "NETHERLANDS": 'Orange', "SWITZERLAND": "Pink"}
+    color_map = []
+    for node in G:
+        try:
+            country = partner_df.loc[partner_df['Company'] == node, 'Country'].unique()[0]
+            color_map.append(country_colors[country])
+        except IndexError:
+            color_map.append('Black')
+
+    G_spring = nx.spring_layout(G)
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = G_spring[edge[0]]
+        x1, y1 = G_spring[edge[1]]
+        edge_x.append(x0)
+        edge_x.append(x1)
+        edge_x.append(None)
+        edge_y.append(y0)
+        edge_y.append(y1)
+        edge_y.append(None)
+
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    for node in G.nodes():
+        x, y = G_spring[node]
+        node_x.append(x)
+        node_y.append(y)
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers',
+        hoverinfo='text',
+        marker=dict(
+            showscale=False,
+            size=10,
+            line_width=2)
+    )
+
+    node_adjacencies = []
+    node_text = []
+    for node, adjacencies in enumerate(G.adjacency()):
+        node_adjacencies.append(len(adjacencies[1]))
+        node_text.append(list(G.nodes())[node])
+
+
+    node_trace.marker.color = color_map
+    node_trace.text = node_text
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout= go.Layout(
+                        title=f"{partner} Networks",
+                        titlefont_size=16,
+                        showlegend=False,
+                        hovermode='closest',
+                        margin=dict(b=20,l=5,r=5,t=40),
+                        annotations=[dict(
+                            text='',
+                            showarrow=False,
+                            xref="paper", yref="paper",
+                            x=0.005, y=-0.002 ) ],
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+    return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True)
